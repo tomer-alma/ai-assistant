@@ -1,0 +1,41 @@
+audio:
+  sample_rate: 16000
+  channels: 1
+  device_input: default
+  device_output: default
+  vad_frame_ms: 20
+  vad_aggressiveness: 2
+
+wake:
+  start_phrase: "שלום בובה"
+  stop_phrase: "די בובה"
+  min_confidence: 0.6
+
+language:
+  stt_lang: "he"
+  tts_lang: "he"
+  style_prompt: "ענה בעברית פשוטה לילדים, קצר ולעניין."
+
+streaming:
+  stt_partials: true
+  llm_stream_tokens: true
+  tts_stream_audio: true
+  half_duplex: true
+  barge_in: true
+  first_token_timeout_ms: 700
+
+models:
+  stt: "gpt-4o-mini-transcribe"
+  llm: "gpt-4o-mini"
+  tts: "gpt-4o-mini-tts"
+  tts_voice: "kids_friendly_1"
+
+safety:
+  enable_moderation: true
+  fallback_message: "בואו נדבר על משהו אחר שמתאים לילדים."
+
+timeouts:
+  stt_finalize_ms: 900
+  llm_total_ms: 5000
+  tts_chunk_ms: 200
+
