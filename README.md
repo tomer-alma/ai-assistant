@@ -20,6 +20,7 @@ A voice-powered AI assistant with Hebrew language support, built with OpenAI's A
 - Python 3.10+
 - OpenAI API key
 - WSL2 with PulseAudio (for Linux/WSL users) or native audio support
+- **For Raspberry Pi**: See [RASPBERRY_PI_SETUP.md](RASPBERRY_PI_SETUP.md) for detailed Pi 5 installation guide
 
 ### Installation
 
@@ -161,7 +162,8 @@ ai-assistant/
 
 - `make venv` - Create virtual environment
 - `make install` - Install all dependencies
-- `make dev-run` - Run the assistant
+- `make dev-run` - Run the assistant (WSL2/Linux with PulseAudio)
+- `make pi-run` - Run the assistant (Raspberry Pi / native audio)
 - `make clean` - Remove virtual environment
 
 ## License
