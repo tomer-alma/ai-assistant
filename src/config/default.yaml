@@ -4,17 +4,22 @@ audio:
   device_input: pulse
   device_output: pulse
   vad_frame_ms: 20
-  vad_aggressiveness: 2
-
-wake:
-  start_phrase: "שלום בובה"
-  stop_phrase: "די בובה"
-  min_confidence: 0.6
+  vad_aggressiveness: 2  # Reduced from 3 to reduce false positives from echo
 
 language:
   stt_lang: "he"
   tts_lang: "he"
-  style_prompt: "ענה בעברית פשוטה לילדים, קצר ולעניין."
+  style_prompt: "ענה בעברית קצר וברור, עד 4 משפטים."
+  greeting: "שלום! אני כאן לעזור לך. במה אוכל לסייע?"
+  closing: "להתראות! היה נעים לדבר איתך."
+  exit_keywords:
+    - "להתראות"
+    - "ביי"
+    - "bye"
+    - "תפסיק"
+    - "סיום"
+    - "עצור"
+    - "יציאה"
 
 streaming:
   stt_partials: true
@@ -24,18 +29,23 @@ streaming:
   barge_in: true
   first_token_timeout_ms: 700
 
+debugging:
+  show_latency: true  # Display latency metrics after each response
+
 models:
   stt: "gpt-4o-mini-transcribe"
   llm: "gpt-4o-mini"
   tts: "gpt-4o-mini-tts"
-  tts_voice: "kids_friendly_1"
+  tts_voice: "nova"  # OpenAI voices: alloy, echo, fable, onyx, nova, shimmer, coral
 
 safety:
   enable_moderation: true
   fallback_message: "בואו נדבר על משהו אחר שמתאים לילדים."
 
 timeouts:
-  stt_finalize_ms: 900
+  stt_finalize_ms: 600  # Reduced to 600ms for faster response (was 800ms)
   llm_total_ms: 5000
   tts_chunk_ms: 200
+  post_greeting_settle_ms: 800  # Settling time after greeting before first listen
+  post_response_settle_ms: 300  # Settling time after each response (for echo prevention)
 

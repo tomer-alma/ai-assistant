@@ -1,5 +1,5 @@
 python-dotenv==1.0.1
-sounddevice==0.4.7
+pyaudio==0.2.13
 webrtcvad==2.0.10
 numpy<2.0,>=1.26.4  # Pinned below 2.0 for tflite/tensorflow compatibility
 requests==2.32.3
@@ -7,6 +7,8 @@ httpx[socks]==0.27.2
 anyio==4.4.0
 pydantic==2.9.2
 PyYAML==6.0.2
-openwakeword==0.6.0
-openai>=1.54.0,<2.0.0 # Updated for wider compatibility
+openai<2.0.0,>=1.54.0
+python-bidi==0.4.2
+arabic-reshaper==3.0.0
+pydub==0.25.1  # Audio format conversion for TTS
 

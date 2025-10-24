@@ -1,71 +1,135 @@
 from __future__ import annotations
 
 import asyncio
+import queue
+import threading
 from typing import AsyncIterator, Optional
 
 import numpy as np
-import sounddevice as sd
+import pyaudio
 
 
 class AudioPlayback:
     """Asynchronous PCM16 playback with small jitter buffer and optional fade-out."""
 
-    def __init__(self, sample_rate: int, channels: int, device: Optional[str]) -> None:
+    def __init__(self, pa: pyaudio.PyAudio, sample_rate: int, channels: int, device: Optional[str]) -> None:
         self.sample_rate = sample_rate
         self.channels = channels
-        self.device = device
+        self.device_name = device
 
-        self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=100)
+        self._pa = pa
+        self._device_index = self._find_device_index(device)
+        self._queue: queue.Queue[Optional[bytes]] = queue.Queue(maxsize=100)
         self._running: bool = False
+        self._thread: Optional[threading.Thread] = None
+        self._loop = asyncio.get_running_loop()
 
-    def _callback(self, out_data, frames, time, status) -> None:  # type: ignore[no-untyped-def]
-        if status:
-            # Ignore for skeleton
-            pass
-        try:
-            data = self._queue.get_nowait()
-        except asyncio.QueueEmpty:
-            out_data[:] = b"\x00" * (frames * self.channels * 2)
-            return
+    def _find_device_index(self, device_name: Optional[str]) -> Optional[int]:
+        if not device_name or device_name == "default":
+            return None
+        for i in range(self._pa.get_device_count()):
+            info = self._pa.get_device_info_by_index(i)
+            if info.get("name") == device_name and info.get("maxOutputChannels") > 0:
+                return i
+        return None
 
-        needed_bytes = frames * self.channels * 2
-        if len(data) < needed_bytes:
-            data = data + b"\x00" * (needed_bytes - len(data))
-        elif len(data) > needed_bytes:
-            data = data[:needed_bytes]
-        out_data[:] = data
+    def _playback_thread(self, loop: asyncio.AbstractEventLoop) -> None:
+        blocksize = int(self.sample_rate * 20 / 1000)
+
+        def stream_callback(in_data, frame_count, time_info, status):
+            try:
+                chunk = self._queue.get(timeout=0.5)
+                if chunk is None:  # Sentinel for stream end
+                    return (None, pyaudio.paComplete)
+                if len(chunk) < frame_count * self.channels * 2:
+                    needed = frame_count * self.channels * 2 - len(chunk)
+                    chunk += b"\x00" * needed
+                return (chunk, pyaudio.paContinue)
+            except queue.Empty:
+                return (b"\x00" * frame_count * self.channels * 2, pyaudio.paContinue)
+
+        stream = self._pa.open(
+            format=pyaudio.paInt16,
+            channels=self.channels,
+            rate=self.sample_rate,
+            output=True,
+            frames_per_buffer=blocksize,
+            output_device_index=self._device_index,
+            stream_callback=stream_callback,
+        )
+
+        stream.start_stream()
+        while self._running and stream.is_active():
+            future = asyncio.run_coroutine_threadsafe(asyncio.sleep(0.1), loop)
+            try:
+                future.result()
+            except asyncio.CancelledError:
+                break
+
+        stream.stop_stream()
+        stream.close()
 
     async def play_stream(self, source: AsyncIterator[bytes]) -> None:
         """Consume an async stream of PCM16 frames and play them."""
-        blocksize = int(self.sample_rate * 20 / 1000)
         self._running = True
-        with sd.RawOutputStream(
-            samplerate=self.sample_rate,
-            channels=self.channels,
-            dtype="int16",
-            blocksize=blocksize,
-            callback=self._callback,
-            device=self.device if self.device and self.device != "default" else None,
-        ):
-            async for chunk in source:
-                if not self._running:
-                    break
-                await self._queue.put(chunk)
+        self._thread = threading.Thread(target=self._playback_thread, args=(self._loop,))
+        self._thread.start()
+
+        async for chunk in source:
+            if not self._running:
+                break
+            await self._loop.run_in_executor(None, self._queue.put, chunk)
+        
+        await self._loop.run_in_executor(None, self._queue.put, None)  # Sentinel
+        if self._thread:
+            await self._loop.run_in_executor(None, self._thread.join)
+
+    async def stop(self) -> None:
+        self._running = False
+        try:
+            self._queue.put_nowait(None)
+        except queue.Full:
+            pass
+        if self._thread:
+            await self._loop.run_in_executor(None, self._thread.join)
+            self._thread = None
 
     async def fade_out_and_stop(self, duration_ms: int = 150) -> None:
         """Fade out queued audio and stop playback."""
-        steps = max(1, duration_ms // 20)
-        buffered: list[bytes] = []
+        self._running = False
+        # Create a temporary list to hold faded audio
+        faded_audio: queue.Queue[Optional[bytes]] = queue.Queue()
+
+        # Drain the original queue
+        buffered = []
         while not self._queue.empty():
             try:
                 buffered.append(self._queue.get_nowait())
-            except asyncio.QueueEmpty:
+            except queue.Empty:
                 break
+        
+        # Apply fade-out
+        steps = max(1, duration_ms // 20)
+        full_buffer = b"".join(filter(None, buffered))
+        
+        arr = np.frombuffer(full_buffer, dtype=np.int16)
+        
         for i in range(steps, 0, -1):
             factor = i / steps
-            for chunk in buffered:
-                arr = np.frombuffer(chunk, dtype=np.int16)
-                faded = (arr.astype(np.float32) * factor).astype(np.int16)
-                await self._queue.put(faded.tobytes())
-        self._running = False
+            faded_chunk = (arr.astype(np.float32) * factor).astype(np.int16)
+            faded_audio.put(faded_chunk.tobytes())
+
+        # Clear the original queue and add the faded audio
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+        
+        while not faded_audio.empty():
+            chunk = faded_audio.get_nowait()
+            await self._loop.run_in_executor(None, self._queue.put, chunk)
+
+        await self._loop.run_in_executor(None, self._queue.put, None)
+        await self.stop()
 
